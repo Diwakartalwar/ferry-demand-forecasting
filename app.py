@@ -353,15 +353,29 @@ def load_and_process_data():
     sample_path = "data/raw/ferry_sample_data.csv"
     sample_dir = Path(sample_path).parent
     sample_dir.mkdir(parents=True, exist_ok=True)
+    sample_created = False
+    path_existed_before = Path(sample_path).exists()
     if not Path(sample_path).exists():
         create_sample_data(sample_path, days=30)
+        sample_created = True
     
     # Preprocess
     preprocessor = FerryDataPreprocessor()
-    df = preprocessor.load_data(sample_path)
-    df = preprocessor.preprocess_pipeline(df)
+    raw_df = preprocessor.load_data(sample_path)
+    raw_min = pd.to_datetime(raw_df["Timestamp"]).min() if "Timestamp" in raw_df.columns else None
+    raw_max = pd.to_datetime(raw_df["Timestamp"]).max() if "Timestamp" in raw_df.columns else None
+    df = preprocessor.preprocess_pipeline(raw_df)
     
-    return df
+    source_info = {
+        "sample_path": sample_path,
+        "path_existed_before": path_existed_before,
+        "sample_created": sample_created,
+        "raw_rows": len(raw_df),
+        "raw_min": raw_min,
+        "raw_max": raw_max,
+    }
+
+    return df, source_info
 
 
 @st.cache_data
@@ -370,6 +384,22 @@ def engineer_features(df):
     engineer = FerryFeatureEngineer()
     df_features = engineer.create_all_features(df)
     return df_features, engineer
+
+
+def _frame_stats(name: str, frame: pd.DataFrame) -> dict:
+    """Collect row count and datetime bounds for diagnostics."""
+    if frame is None or len(frame) == 0:
+        return {"Frame": name, "Rows": 0, "Min Date": None, "Max Date": None}
+
+    idx = frame.index
+    min_val = idx.min() if hasattr(idx, "min") else None
+    max_val = idx.max() if hasattr(idx, "max") else None
+    return {
+        "Frame": name,
+        "Rows": len(frame),
+        "Min Date": min_val,
+        "Max Date": max_val,
+    }
 
 
 @st.cache_resource
@@ -489,8 +519,14 @@ def main():
     
     # Load data
     with st.spinner("Loading and processing data..."):
-        df = load_and_process_data()
+        df, source_info = load_and_process_data()
         df_features, engineer = engineer_features(df)
+
+    if source_info["sample_created"] or not source_info["path_existed_before"]:
+        st.warning(
+            "Fallback sample data was generated because the checked-in CSV was not available. "
+            "This produces only about 30 days of dates in Streamlit Cloud."
+        )
     
     # Get feature matrix for selected horizon
     X, y = engineer.get_feature_matrix(df_features, horizon=selected_horizon)
@@ -591,6 +627,23 @@ def main():
 
     latest_forecast = float(y_pred_all[-1]) if len(y_pred_all) else 0.0
     latest_alert = forecaster.generate_operational_alert(latest_forecast, thresholds)
+
+    with st.expander("Diagnostics", expanded=False):
+        st.write("Source file:", source_info["sample_path"])
+        st.write("Source existed before load:", source_info["path_existed_before"])
+        st.write("Sample created in runtime:", source_info["sample_created"])
+        st.write("Raw Rows:", source_info["raw_rows"])
+        st.write("Raw Min Date:", source_info["raw_min"])
+        st.write("Raw Max Date:", source_info["raw_max"])
+        diag_df = pd.DataFrame([
+            {"Frame": "Processed df", **_frame_stats("Processed df", df)},
+            {"Frame": "Features df", **_frame_stats("Features df", df_features)},
+            {"Frame": "Feature matrix X", **_frame_stats("Feature matrix X", X)},
+            {"Frame": "Train X", **_frame_stats("Train X", X_train)},
+            {"Frame": "Test X", **_frame_stats("Test X", X_test)},
+            {"Frame": "Filtered X", **_frame_stats("Filtered X", X_view)},
+        ])
+        st.dataframe(diag_df, use_container_width=True, hide_index=True)
 
     st.caption(
         f"Best model on the current test split: {best_model_name} "
