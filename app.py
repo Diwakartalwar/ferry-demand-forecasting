@@ -89,7 +89,29 @@ st.markdown("""
     [data-testid="stSidebar"] input,
     [data-testid="stSidebar"] textarea,
     [data-testid="stSidebar"] [role="combobox"] {
-        color: #0f172a !important;
+        color: #f8fafc !important;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] > div,
+    [data-testid="stSidebar"] [data-baseweb="input"] > div,
+    [data-testid="stSidebar"] input[type="text"],
+    [data-testid="stSidebar"] input[type="date"] {
+        background: rgba(15, 23, 42, 0.96) !important;
+        color: #f8fafc !important;
+        border-color: rgba(148, 163, 184, 0.18) !important;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] * {
+        color: #f8fafc !important;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] svg {
+        fill: #cbd5e1 !important;
+    }
+
+    [data-testid="stSidebar"] [data-baseweb="select"] > div:hover,
+    [data-testid="stSidebar"] [data-baseweb="input"] > div:hover {
+        border-color: rgba(56, 189, 248, 0.42) !important;
     }
 
     .main-header {
@@ -477,11 +499,11 @@ def main():
     trainer = setup_default_models()
     X_train, X_test, y_train, y_test = trainer.time_series_split(X, y, test_size=0.2)
 
-    # Date range selector follows the actual test data range.
+    # Date range selector follows the full feature timeline.
     st.sidebar.subheader("Date Range")
-    data_start = X_test.index.min().date()
-    data_end = X_test.index.max().date()
-    default_start = data_start  # Show full range by default
+    data_start = X.index.min().date()
+    data_end = X.index.max().date()
+    default_start = max(data_start, (pd.Timestamp(data_end) - pd.Timedelta(days=30)).date())
     date_range = st.sidebar.date_input(
         "Select Date Range",
         value=(default_start, data_end),
@@ -507,10 +529,10 @@ def main():
         return
 
     model = trained_models[model_key]
-    y_pred = model.predict(X_test)
+    y_pred_test = model.predict(X_test)
 
     evaluator = ModelEvaluator()
-    metrics = evaluator.evaluate_model(model_key, y_test.values, y_pred)
+    metrics = evaluator.evaluate_model(model_key, y_test.values, y_pred_test)
 
     comparison_metrics = {}
     for m_key, m_model in trained_models.items():
@@ -534,29 +556,34 @@ def main():
 
     forecaster = FerryForecaster()
 
+    y_pred_all = model.predict(X)
+    y_actual_all = y
+
     # Filter by date range
     if len(date_range) == 2:
         start_date, end_date = date_range
-        mask = (X_test.index >= pd.Timestamp(start_date)) & (X_test.index <= pd.Timestamp(end_date))
-        X_test_filtered = X_test[mask]
-        y_test_filtered = y_test[mask]
-        y_pred_filtered = y_pred[mask]
-        if len(y_test_filtered) == 0:
-            st.info("Selected dates have no test records. Showing full test range.")
-            X_test_filtered = X_test
-            y_test_filtered = y_test
-            y_pred_filtered = y_pred
+        mask = (X.index >= pd.Timestamp(start_date)) & (X.index <= pd.Timestamp(end_date))
+        X_view = X[mask]
+        y_view = y_actual_all[mask]
+        y_pred_view = y_pred_all[mask]
+        if len(y_view) == 0:
+            st.info("Selected dates have no records. Showing the latest 30 days instead.")
+            fallback_start = max(X.index.min(), X.index.max() - pd.Timedelta(days=30))
+            mask = (X.index >= fallback_start) & (X.index <= X.index.max())
+            X_view = X[mask]
+            y_view = y_actual_all[mask]
+            y_pred_view = y_pred_all[mask]
     else:
-        X_test_filtered = X_test
-        y_test_filtered = y_test
-        y_pred_filtered = y_pred
+        X_view = X
+        y_view = y_actual_all
+        y_pred_view = y_pred_all
 
-    latest_forecast = float(y_pred_filtered[-1]) if len(y_pred_filtered) else 0.0
+    latest_forecast = float(y_pred_all[-1]) if len(y_pred_all) else 0.0
     latest_alert = forecaster.generate_operational_alert(latest_forecast, thresholds)
 
     st.caption(
         f"Best model on the current test split: {best_model_name} "
-        f"({best_model_mae:.2f} MAE)"
+        f"({best_model_mae:.2f} MAE). Sidebar date filter now spans the full timeline."
     )
 
     # KPI Section
@@ -609,15 +636,15 @@ def main():
 
     fig_forecast = go.Figure()
     fig_forecast.add_trace(go.Scatter(
-        x=y_test_filtered.index,
-        y=y_test_filtered.values,
+        x=y_view.index,
+        y=y_view.values,
         mode='lines',
         name='Actual',
         line=dict(color='#38bdf8', width=2.6)
     ))
     fig_forecast.add_trace(go.Scatter(
-        x=y_test_filtered.index,
-        y=y_pred_filtered,
+        x=y_view.index,
+        y=y_pred_view,
         mode='lines',
         name='Forecast',
         line=dict(color='#f59e0b', width=2.6, dash='dash')
@@ -625,10 +652,10 @@ def main():
 
     if show_confidence:
         lower, upper = evaluator.calculate_confidence_intervals(
-            y_pred_filtered, y_test_filtered.values, confidence=0.95
+            y_pred_view, y_view.values, confidence=0.95
         )
         fig_forecast.add_trace(go.Scatter(
-            x=y_test_filtered.index,
+            x=y_view.index,
             y=upper,
             mode='lines',
             line=dict(width=0),
@@ -636,7 +663,7 @@ def main():
             hoverinfo='skip'
         ))
         fig_forecast.add_trace(go.Scatter(
-            x=y_test_filtered.index,
+            x=y_view.index,
             y=lower,
             mode='lines',
             line=dict(width=0),
@@ -666,9 +693,9 @@ def main():
     # Peak Demand Alerts
     st.header("🚨 Peak Demand Alerts")
 
-    recent_forecasts = y_pred_filtered[-10:]
+    recent_forecasts = y_pred_view[-10:]
     recent_alerts = [forecaster.generate_operational_alert(f, thresholds) for f in recent_forecasts]
-    recent_timestamps = y_test_filtered.index[-10:]
+    recent_timestamps = y_view.index[-10:]
 
     alert_df = pd.DataFrame({
         'Timestamp': recent_timestamps,
@@ -702,11 +729,11 @@ def main():
     hourly_demand = df.groupby(df.index.hour)['Sales Count'].mean()
 
     pred_table_df = pd.DataFrame({
-        'Timestamp': y_test_filtered.index,
-        'Actual': y_test_filtered.values,
-        'Forecast': y_pred_filtered,
-        'Error': y_test_filtered.values - y_pred_filtered,
-        'Absolute Error': np.abs(y_test_filtered.values - y_pred_filtered)
+        'Timestamp': y_view.index,
+        'Actual': y_view.values,
+        'Forecast': y_pred_view,
+        'Error': y_view.values - y_pred_view,
+        'Absolute Error': np.abs(y_view.values - y_pred_view)
     })
 
     if show_confidence:
