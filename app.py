@@ -507,18 +507,30 @@ def main():
     end_year = int(data_end.year)
     st.sidebar.caption(f"Full range: {data_start.date()} to {data_end.date()}")
 
+    if "year_range_filter" not in st.session_state:
+        st.session_state.year_range_filter = (start_year, end_year)
+    if "month_range_filter" not in st.session_state:
+        st.session_state.month_range_filter = (1, 12)
+
+    if st.sidebar.button("Reset Date Filter"):
+        st.session_state.year_range_filter = (start_year, end_year)
+        st.session_state.month_range_filter = (1, 12)
+        st.rerun()
+
     year_range = st.sidebar.slider(
         "Year Range",
         min_value=start_year,
         max_value=end_year,
-        value=(start_year, end_year),
+        value=st.session_state.year_range_filter,
+        key="year_range_filter",
         step=1
     )
     month_range = st.sidebar.slider(
         "Month Range",
         min_value=1,
         max_value=12,
-        value=(1, 12),
+        value=st.session_state.month_range_filter,
+        key="month_range_filter",
         step=1
     )
     
@@ -572,12 +584,9 @@ def main():
 
     year_start, year_end = year_range
     month_start, month_end = month_range
-    mask = (
-        (X.index.year >= year_start) &
-        (X.index.year <= year_end) &
-        (X.index.month >= month_start) &
-        (X.index.month <= month_end)
-    )
+    start_dt = pd.Timestamp(year=year_start, month=month_start, day=1)
+    end_dt = pd.Timestamp(year=year_end, month=month_end, day=1) + pd.offsets.MonthEnd(1)
+    mask = (X.index >= start_dt) & (X.index <= end_dt)
     X_view = X[mask]
     y_view = y_actual_all[mask]
     y_pred_view = y_pred_all[mask]
@@ -593,7 +602,7 @@ def main():
 
     st.caption(
         f"Best model on the current test split: {best_model_name} "
-        f"({best_model_mae:.2f} MAE). Filter is Year {year_start}-{year_end}, Month {month_start}-{month_end}."
+        f"({best_model_mae:.2f} MAE). Filter is {start_dt.date()} to {end_dt.date()}."
     )
 
     # KPI Section
