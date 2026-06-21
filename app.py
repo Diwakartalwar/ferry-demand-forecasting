@@ -503,7 +503,7 @@ def main():
     st.sidebar.subheader("Date Range")
     data_start = X.index.min().date()
     data_end = X.index.max().date()
-    default_start = max(data_start, (pd.Timestamp(data_end) - pd.Timedelta(days=30)).date())
+    default_start = data_start
     date_range = st.sidebar.date_input(
         "Select Date Range",
         value=(default_start, data_end),
