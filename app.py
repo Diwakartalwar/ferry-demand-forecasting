@@ -503,12 +503,13 @@ def main():
     st.sidebar.subheader("Date Range")
     data_start = X.index.min().date()
     data_end = X.index.max().date()
-    default_start = data_start
-    date_range = st.sidebar.date_input(
+    st.sidebar.caption(f"Full range: {data_start} to {data_end}")
+    date_range = st.sidebar.slider(
         "Select Date Range",
-        value=(default_start, data_end),
-        min_value=data_start,
-        max_value=data_end
+        min_value=pd.Timestamp(data_start).to_pydatetime(),
+        max_value=pd.Timestamp(data_end).to_pydatetime(),
+        value=(pd.Timestamp(data_start).to_pydatetime(), pd.Timestamp(data_end).to_pydatetime()),
+        format="YYYY-MM-DD"
     )
     
     # Load pre-trained models (cached)
