@@ -383,6 +383,46 @@ def engineer_features(df):
     return df_features, engineer
 
 
+@st.cache_data
+def get_single_prediction(_model, X):
+    """Cache predictions for a specific model and feature matrix."""
+    return _model.predict(X)
+
+
+@st.cache_data
+def get_comparison_metrics(horizon, _trained_models, X_test, y_test_values):
+    """Cache the calculation of test evaluation metrics for all models."""
+    comparison_metrics = {}
+    for m_key, m_model in _trained_models.items():
+        try:
+            m_pred = m_model.predict(X_test)
+            m_evaluator = ModelEvaluator()
+            comparison_metrics[m_key] = m_evaluator.evaluate_model(m_key, y_test_values, m_pred)
+        except Exception:
+            pass
+    return comparison_metrics
+
+
+@st.cache_data
+def calculate_next_forecasts(_trained_models, model_key, _engineer, df_features, horizon_options):
+    """Cache feature matrix preparation and next-step forecasts across horizons."""
+    next_forecasts = {}
+    for horizon in horizon_options:
+        h_X, _ = _engineer.get_feature_matrix(df_features, horizon=horizon)
+        pred = _trained_models[model_key].predict(h_X.tail(1))
+        next_forecasts[horizon] = float(pred[0])
+    return next_forecasts
+
+
+@st.cache_data
+def get_demand_patterns(df):
+    """Cache the daily and hourly demand aggregations."""
+    daily_demand = df['Sales Count'].resample('D').sum()
+    hourly_demand = df.groupby(df.index.hour)['Sales Count'].mean()
+    return daily_demand, hourly_demand
+
+
+
 def _frame_stats(name: str, frame: pd.DataFrame) -> dict:
     """Collect row count and datetime bounds for diagnostics."""
     if frame is None or len(frame) == 0:
@@ -580,19 +620,12 @@ def main():
         return
 
     model = trained_models[model_key]
-    y_pred_test = model.predict(X_test)
+    y_pred_test = get_single_prediction(model, X_test)
 
     evaluator = ModelEvaluator()
     metrics = evaluator.evaluate_model(model_key, y_test.values, y_pred_test)
 
-    comparison_metrics = {}
-    for m_key, m_model in trained_models.items():
-        try:
-            m_pred = m_model.predict(X_test)
-            m_evaluator = ModelEvaluator()
-            comparison_metrics[m_key] = m_evaluator.evaluate_model(m_key, y_test.values, m_pred)
-        except Exception:
-            pass
+    comparison_metrics = get_comparison_metrics(selected_horizon, trained_models, X_test, y_test.values)
 
     comparison_df = pd.DataFrame(comparison_metrics).T.round(4)
     if not comparison_df.empty:
@@ -607,7 +640,7 @@ def main():
 
     forecaster = FerryForecaster()
 
-    y_pred_all = model.predict(X)
+    y_pred_all = get_single_prediction(model, X)
     y_actual_all = y
 
     if len(date_range) == 2:
@@ -671,11 +704,7 @@ def main():
         render_kpi_card("Test R²", f"{metrics['R2']:.3f}", "Higher is better", "#a78bfa")
 
     # Calculate next forecasts
-    next_forecasts = {}
-    for horizon in horizon_options:
-        h_X, _ = engineer.get_feature_matrix(df_features, horizon=horizon)
-        pred = trained_models[model_key].predict(h_X.tail(1))
-        next_forecasts[horizon] = float(pred[0])
+    next_forecasts = calculate_next_forecasts(trained_models, model_key, engineer, df_features, horizon_options)
 
     forecast_cols = st.columns(4)
     for i, horizon in enumerate(horizon_options):
@@ -705,37 +734,47 @@ def main():
     # Forecast vs Actual Visualization
     st.header("📈 Forecast vs Actual")
 
+    # Downsample for visualization if data points exceed 3000
+    max_plot_points = 3000
+    if len(y_view) > max_plot_points:
+        step = len(y_view) // max_plot_points + 1
+        y_view_plot = y_view.iloc[::step]
+        y_pred_view_plot = y_pred_view[::step]
+    else:
+        y_view_plot = y_view
+        y_pred_view_plot = y_pred_view
+
     fig_forecast = go.Figure()
     fig_forecast.add_trace(go.Scatter(
-        x=y_view.index,
-        y=y_view.values,
+        x=y_view_plot.index,
+        y=y_view_plot.values,
         mode='lines',
         name='Actual',
         line=dict(color='#38bdf8', width=2.6)
     ))
     fig_forecast.add_trace(go.Scatter(
-        x=y_view.index,
-        y=y_pred_view,
+        x=y_view_plot.index,
+        y=y_pred_view_plot,
         mode='lines',
         name='Forecast',
         line=dict(color='#f59e0b', width=2.6, dash='dash')
     ))
 
     if show_confidence:
-        lower, upper = evaluator.calculate_confidence_intervals(
-            y_pred_view, y_view.values, confidence=0.95
+        lower_plot, upper_plot = evaluator.calculate_confidence_intervals(
+            y_pred_view_plot, y_view_plot.values, confidence=0.95
         )
         fig_forecast.add_trace(go.Scatter(
-            x=y_view.index,
-            y=upper,
+            x=y_view_plot.index,
+            y=upper_plot,
             mode='lines',
             line=dict(width=0),
             showlegend=False,
             hoverinfo='skip'
         ))
         fig_forecast.add_trace(go.Scatter(
-            x=y_view.index,
-            y=lower,
+            x=y_view_plot.index,
+            y=lower_plot,
             mode='lines',
             line=dict(width=0),
             fill='tonexty',
@@ -796,20 +835,25 @@ def main():
             unsafe_allow_html=True
         )
 
-    daily_demand = df['Sales Count'].resample('D').sum()
-    hourly_demand = df.groupby(df.index.hour)['Sales Count'].mean()
+    daily_demand, hourly_demand = get_demand_patterns(df)
+
+    y_view_tail = y_view.tail(20)
+    y_pred_view_tail = y_pred_view[-20:] if len(y_pred_view) >= 20 else y_pred_view
 
     pred_table_df = pd.DataFrame({
-        'Timestamp': y_view.index,
-        'Actual': y_view.values,
-        'Forecast': y_pred_view,
-        'Error': y_view.values - y_pred_view,
-        'Absolute Error': np.abs(y_view.values - y_pred_view)
+        'Timestamp': y_view_tail.index,
+        'Actual': y_view_tail.values,
+        'Forecast': y_pred_view_tail,
+        'Error': y_view_tail.values - y_pred_view_tail,
+        'Absolute Error': np.abs(y_view_tail.values - y_pred_view_tail)
     })
 
     if show_confidence:
-        pred_table_df['Lower Bound'] = lower
-        pred_table_df['Upper Bound'] = upper
+        lower_tail, upper_tail = evaluator.calculate_confidence_intervals(
+            y_pred_view_tail, y_view_tail.values, confidence=0.95
+        )
+        pred_table_df['Lower Bound'] = lower_tail
+        pred_table_df['Upper Bound'] = upper_tail
 
     pred_table_df = pred_table_df.round(2)
 
@@ -934,7 +978,7 @@ def main():
     with table_tab:
         st.markdown('<div class="section-label">Latest forecast rows</div>', unsafe_allow_html=True)
         st.dataframe(
-            pred_table_df.tail(20),
+            pred_table_df,
             use_container_width=True,
             hide_index=True,
             column_config={
