@@ -4,8 +4,6 @@ venv
 venv
 /venv
 /venv
-.csv
-*.csv
 *.xlsx
 *.xls
 *.json
