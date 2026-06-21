@@ -501,15 +501,25 @@ def main():
 
     # Date range selector follows the full feature timeline.
     st.sidebar.subheader("Date Range")
-    data_start = X.index.min().date()
-    data_end = X.index.max().date()
-    st.sidebar.caption(f"Full range: {data_start} to {data_end}")
-    date_range = st.sidebar.slider(
-        "Select Date Range",
-        min_value=pd.Timestamp(data_start).to_pydatetime(),
-        max_value=pd.Timestamp(data_end).to_pydatetime(),
-        value=(pd.Timestamp(data_start).to_pydatetime(), pd.Timestamp(data_end).to_pydatetime()),
-        format="YYYY-MM-DD"
+    data_start = X.index.min()
+    data_end = X.index.max()
+    start_year = int(data_start.year)
+    end_year = int(data_end.year)
+    st.sidebar.caption(f"Full range: {data_start.date()} to {data_end.date()}")
+
+    year_range = st.sidebar.slider(
+        "Year Range",
+        min_value=start_year,
+        max_value=end_year,
+        value=(start_year, end_year),
+        step=1
+    )
+    month_range = st.sidebar.slider(
+        "Month Range",
+        min_value=1,
+        max_value=12,
+        value=(1, 12),
+        step=1
     )
     
     # Load pre-trained models (cached)
@@ -560,21 +570,20 @@ def main():
     y_pred_all = model.predict(X)
     y_actual_all = y
 
-    # Filter by date range
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        mask = (X.index >= pd.Timestamp(start_date)) & (X.index <= pd.Timestamp(end_date))
-        X_view = X[mask]
-        y_view = y_actual_all[mask]
-        y_pred_view = y_pred_all[mask]
-        if len(y_view) == 0:
-            st.info("Selected dates have no records. Showing the latest 30 days instead.")
-            fallback_start = max(X.index.min(), X.index.max() - pd.Timedelta(days=30))
-            mask = (X.index >= fallback_start) & (X.index <= X.index.max())
-            X_view = X[mask]
-            y_view = y_actual_all[mask]
-            y_pred_view = y_pred_all[mask]
-    else:
+    year_start, year_end = year_range
+    month_start, month_end = month_range
+    mask = (
+        (X.index.year >= year_start) &
+        (X.index.year <= year_end) &
+        (X.index.month >= month_start) &
+        (X.index.month <= month_end)
+    )
+    X_view = X[mask]
+    y_view = y_actual_all[mask]
+    y_pred_view = y_pred_all[mask]
+
+    if len(y_view) == 0:
+        st.warning("No records match that year/month filter. Showing the full timeline instead.")
         X_view = X
         y_view = y_actual_all
         y_pred_view = y_pred_all
@@ -584,7 +593,7 @@ def main():
 
     st.caption(
         f"Best model on the current test split: {best_model_name} "
-        f"({best_model_mae:.2f} MAE). Sidebar date filter now spans the full timeline."
+        f"({best_model_mae:.2f} MAE). Filter is Year {year_start}-{year_end}, Month {month_start}-{month_end}."
     )
 
     # KPI Section
