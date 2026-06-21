@@ -504,9 +504,15 @@ def main():
     data_start = X.index.min()
     data_end = X.index.max()
     st.sidebar.caption(f"Full range: {data_start.date()} to {data_end.date()}")
-    date_range = st.sidebar.date_input(
-        "Select Date Range",
-        value=(data_start.date(), data_end.date()),
+    start_date = st.sidebar.date_input(
+        "Start Date",
+        value=data_start.date(),
+        min_value=data_start.date(),
+        max_value=data_end.date()
+    )
+    end_date = st.sidebar.date_input(
+        "End Date",
+        value=data_end.date(),
         min_value=data_start.date(),
         max_value=data_end.date()
     )
@@ -559,20 +565,17 @@ def main():
     y_pred_all = model.predict(X)
     y_actual_all = y
 
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        start_dt = pd.Timestamp(start_date)
-        end_dt = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
-        mask = (X.index >= start_dt) & (X.index <= end_dt)
-        X_view = X[mask]
-        y_view = y_actual_all[mask]
-        y_pred_view = y_pred_all[mask]
-        if len(y_view) == 0:
-            st.warning("No records match that date range. Showing the full timeline instead.")
-            X_view = X
-            y_view = y_actual_all
-            y_pred_view = y_pred_all
-    else:
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+
+    start_dt = pd.Timestamp(start_date)
+    end_dt = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+    mask = (X.index >= start_dt) & (X.index <= end_dt)
+    X_view = X[mask]
+    y_view = y_actual_all[mask]
+    y_pred_view = y_pred_all[mask]
+    if len(y_view) == 0:
+        st.warning("No records match that date range. Showing the full timeline instead.")
         X_view = X
         y_view = y_actual_all
         y_pred_view = y_pred_all
@@ -582,7 +585,7 @@ def main():
 
     st.caption(
         f"Best model on the current test split: {best_model_name} "
-        f"({best_model_mae:.2f} MAE). Filter is {data_start.date()} to {data_end.date()}."
+        f"({best_model_mae:.2f} MAE). Filter is {start_dt.date()} to {end_dt.date()}."
     )
 
     # KPI Section
