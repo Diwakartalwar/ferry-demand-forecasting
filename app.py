@@ -504,17 +504,20 @@ def main():
     data_start = X.index.min()
     data_end = X.index.max()
     st.sidebar.caption(f"Full range: {data_start.date()} to {data_end.date()}")
-    start_date = st.sidebar.date_input(
-        "Start Date",
-        value=data_start.date(),
+    date_range_key = "dashboard_date_range"
+    if date_range_key not in st.session_state:
+        st.session_state[date_range_key] = (data_start.date(), data_end.date())
+
+    if st.sidebar.button("Reset Date Range"):
+        st.session_state[date_range_key] = (data_start.date(), data_end.date())
+        st.rerun()
+
+    date_range = st.sidebar.date_input(
+        "Select Date Range",
+        value=st.session_state[date_range_key],
         min_value=data_start.date(),
-        max_value=data_end.date()
-    )
-    end_date = st.sidebar.date_input(
-        "End Date",
-        value=data_end.date(),
-        min_value=data_start.date(),
-        max_value=data_end.date()
+        max_value=data_end.date(),
+        key=date_range_key
     )
     
     # Load pre-trained models (cached)
@@ -565,17 +568,23 @@ def main():
     y_pred_all = model.predict(X)
     y_actual_all = y
 
-    if start_date > end_date:
-        start_date, end_date = end_date, start_date
+    if len(date_range) == 2:
+        start_date, end_date = date_range
+        if start_date > end_date:
+            start_date, end_date = end_date, start_date
 
-    start_dt = pd.Timestamp(start_date)
-    end_dt = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
-    mask = (X.index >= start_dt) & (X.index <= end_dt)
-    X_view = X[mask]
-    y_view = y_actual_all[mask]
-    y_pred_view = y_pred_all[mask]
-    if len(y_view) == 0:
-        st.warning("No records match that date range. Showing the full timeline instead.")
+        start_dt = pd.Timestamp(start_date)
+        end_dt = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+        mask = (X.index >= start_dt) & (X.index <= end_dt)
+        X_view = X[mask]
+        y_view = y_actual_all[mask]
+        y_pred_view = y_pred_all[mask]
+        if len(y_view) == 0:
+            st.warning("No records match that date range. Showing the full timeline instead.")
+            X_view = X
+            y_view = y_actual_all
+            y_pred_view = y_pred_all
+    else:
         X_view = X
         y_view = y_actual_all
         y_pred_view = y_pred_all
@@ -585,7 +594,7 @@ def main():
 
     st.caption(
         f"Best model on the current test split: {best_model_name} "
-        f"({best_model_mae:.2f} MAE). Filter is {start_dt.date()} to {end_dt.date()}."
+        f"({best_model_mae:.2f} MAE). Filter uses the selected calendar range."
     )
 
     # KPI Section
