@@ -8,22 +8,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'src'))
 
-from preprocess import FerryDataPreprocessor, create_sample_data
+from preprocess import FerryDataPreprocessor
 from features import FerryFeatureEngineer
 from train import setup_default_models
 import joblib
 
 def main():
-    # Ensure data exists
-    sample_path = "data/raw/ferry_sample_data.csv"
-    Path(sample_path).parent.mkdir(parents=True, exist_ok=True)
-    
-    if not Path(sample_path).exists():
-        create_sample_data(sample_path, days=30)
+    sample_path = Path(__file__).resolve().parent / "data/raw/ferry_sample_data.csv"
+    if not sample_path.exists():
+        raise FileNotFoundError(f"Primary dataset not found: {sample_path}")
     
     # Load and preprocess
     preprocessor = FerryDataPreprocessor()
-    df = preprocessor.load_data(sample_path)
+    df = preprocessor.load_data(str(sample_path))
     df = preprocessor.preprocess_pipeline(df)
     
     # Feature engineering

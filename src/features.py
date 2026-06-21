@@ -320,12 +320,16 @@ class FerryFeatureEngineer:
 
 if __name__ == "__main__":
     # Example usage
-    from preprocess import FerryDataPreprocessor, create_sample_data
+    from pathlib import Path
+    from preprocess import FerryDataPreprocessor
     
-    # Create and preprocess sample data
-    create_sample_data("data/raw/ferry_sample_data.csv", days=30)
+    sample_path = Path(__file__).resolve().parent.parent / "data/raw/ferry_sample_data.csv"
+    if not sample_path.exists():
+        raise FileNotFoundError(f"Primary dataset not found: {sample_path}")
+
+    # Load and preprocess primary data
     preprocessor = FerryDataPreprocessor()
-    df = preprocessor.load_data("data/raw/ferry_sample_data.csv")
+    df = preprocessor.load_data(str(sample_path))
     df = preprocessor.preprocess_pipeline(df)
     
     # Engineer features

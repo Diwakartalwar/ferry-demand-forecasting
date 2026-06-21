@@ -17,11 +17,12 @@ import numpy as np
 import plotly.graph_objects as go
 import sys
 from pathlib import Path
+from typing import Tuple
 import joblib
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).resolve().parent / 'src'))
-from preprocess import FerryDataPreprocessor, create_sample_data
+from preprocess import FerryDataPreprocessor
 from features import FerryFeatureEngineer
 from train import setup_default_models, ModelTrainer
 from evaluate import ModelEvaluator
@@ -347,32 +348,28 @@ st.markdown("""
 
 
 @st.cache_data
-def load_and_process_data():
-    """Load and process ferry data."""
-    # Check if sample data exists, create if not
-    sample_path = "data/raw/ferry_sample_data.csv"
-    sample_dir = Path(sample_path).parent
-    sample_dir.mkdir(parents=True, exist_ok=True)
-    sample_created = False
-    path_existed_before = Path(sample_path).exists()
-    if not Path(sample_path).exists():
-        create_sample_data(sample_path, days=30)
-        sample_created = True
-    
-    # Preprocess
+def load_primary_dataset(dataset_path: str, file_signature: Tuple[int, int]):
+    """Load and preprocess the primary ferry dataset."""
     preprocessor = FerryDataPreprocessor()
-    raw_df = preprocessor.load_data(sample_path)
+
+    try:
+        raw_df = preprocessor.load_data(dataset_path)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load primary dataset at {dataset_path}: {exc}") from exc
+
+    try:
+        df = preprocessor.preprocess_pipeline(raw_df)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to preprocess primary dataset at {dataset_path}: {exc}") from exc
+
     raw_min = pd.to_datetime(raw_df["Timestamp"]).min() if "Timestamp" in raw_df.columns else None
     raw_max = pd.to_datetime(raw_df["Timestamp"]).max() if "Timestamp" in raw_df.columns else None
-    df = preprocessor.preprocess_pipeline(raw_df)
-    
     source_info = {
-        "sample_path": sample_path,
-        "path_existed_before": path_existed_before,
-        "sample_created": sample_created,
+        "dataset_path": dataset_path,
         "raw_rows": len(raw_df),
         "raw_min": raw_min,
         "raw_max": raw_max,
+        "signature": file_signature,
     }
 
     return df, source_info
@@ -519,14 +516,23 @@ def main():
     
     # Load data
     with st.spinner("Loading and processing data..."):
-        df, source_info = load_and_process_data()
-        df_features, engineer = engineer_features(df)
+        dataset_path = Path(__file__).resolve().parent / "data/raw/ferry_sample_data.csv"
+        if not dataset_path.exists():
+            st.error(
+                f"Primary dataset not found at {dataset_path}. "
+                "The app will not fall back to demo data."
+            )
+            st.stop()
 
-    if source_info["sample_created"] or not source_info["path_existed_before"]:
-        st.warning(
-            "Fallback sample data was generated because the checked-in CSV was not available. "
-            "This produces only about 30 days of dates in Streamlit Cloud."
-        )
+        try:
+            file_stat = dataset_path.stat()
+            file_signature = (file_stat.st_mtime_ns, file_stat.st_size)
+            df, source_info = load_primary_dataset(str(dataset_path), file_signature)
+        except Exception as exc:
+            st.error(str(exc))
+            st.stop()
+
+        df_features, engineer = engineer_features(df)
     
     # Get feature matrix for selected horizon
     X, y = engineer.get_feature_matrix(df_features, horizon=selected_horizon)
@@ -540,7 +546,7 @@ def main():
     data_start = X.index.min()
     data_end = X.index.max()
     st.sidebar.caption(f"Full range: {data_start.date()} to {data_end.date()}")
-    date_range_key = "dashboard_date_range"
+    date_range_key = "dashboard_date_range_v2"
     if date_range_key not in st.session_state:
         st.session_state[date_range_key] = (data_start.date(), data_end.date())
 
@@ -629,12 +635,13 @@ def main():
     latest_alert = forecaster.generate_operational_alert(latest_forecast, thresholds)
 
     with st.expander("Diagnostics", expanded=False):
-        st.write("Source file:", source_info["sample_path"])
-        st.write("Source existed before load:", source_info["path_existed_before"])
-        st.write("Sample created in runtime:", source_info["sample_created"])
-        st.write("Raw Rows:", source_info["raw_rows"])
-        st.write("Raw Min Date:", source_info["raw_min"])
-        st.write("Raw Max Date:", source_info["raw_max"])
+        st.write("Dataset Path:", source_info["dataset_path"])
+        st.write("Total Rows:", source_info["raw_rows"])
+        st.write("Min Date:", source_info["raw_min"])
+        st.write("Max Date:", source_info["raw_max"])
+        st.write("Rows:", len(df))
+        st.write("Min Date (processed):", df.index.min())
+        st.write("Max Date (processed):", df.index.max())
         diag_df = pd.DataFrame([
             {"Frame": "Processed df", **_frame_stats("Processed df", df)},
             {"Frame": "Features df", **_frame_stats("Features df", df_features)},

@@ -284,56 +284,25 @@ class FerryDataPreprocessor:
 
 def create_sample_data(output_path: str, days: int = 30) -> None:
     """
-    Create sample ferry ticket data for testing.
+    Synthetic data generation is disabled.
     
     Args:
         output_path: Path to save the sample data
         days: Number of days of data to generate
     """
-    np.random.seed(42)
-    
-    # Generate timestamps for 15-minute intervals
-    end_date = pd.Timestamp.now()
-    start_date = end_date - pd.Timedelta(days=days)
-    timestamps = pd.date_range(start=start_date, end=end_date, freq='15min')
-    
-    # Generate realistic patterns
-    data = []
-    for ts in timestamps:
-        hour = ts.hour
-        day_of_week = ts.dayofweek
-        
-        # Base demand varies by hour and day
-        base_demand = 10 + 20 * np.sin((hour - 6) * np.pi / 12)  # Peak around noon
-        if day_of_week >= 5:  # Weekend
-            base_demand *= 1.5
-        
-        # Add random variation
-        sales = max(0, int(base_demand + np.random.normal(0, 5)))
-        redemptions = max(0, int(sales * 0.7 + np.random.normal(0, 3)))
-        
-        data.append({
-            '_id': str(len(data)),
-            'Timestamp': ts.strftime('%Y-%m-%d %H:%M:%S'),
-            'Sales Count': sales,
-            'Redemption Count': redemptions
-        })
-    
-    df = pd.DataFrame(data)
-    df.to_csv(output_path, index=False)
-    print(f"Sample data created with {len(df)} records at {output_path}")
+    raise RuntimeError("Synthetic data generation is disabled. Use the primary ferry dataset.")
 
 
 if __name__ == "__main__":
     # Example usage
     preprocessor = FerryDataPreprocessor()
-    
-    # Create sample data
-    sample_path = "data/raw/ferry_sample_data.csv"
-    create_sample_data(sample_path, days=30)
-    
+
+    sample_path = Path(__file__).resolve().parent.parent / "data/raw/ferry_sample_data.csv"
+    if not sample_path.exists():
+        raise FileNotFoundError(f"Primary dataset not found: {sample_path}")
+
     # Load and preprocess
-    df = preprocessor.load_data(sample_path)
+    df = preprocessor.load_data(str(sample_path))
     processed_df = preprocessor.preprocess_pipeline(df)
     
     # Save processed data

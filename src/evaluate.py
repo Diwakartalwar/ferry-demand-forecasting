@@ -415,16 +415,18 @@ def calculate_horizon_wise_metrics(evaluators: Dict[str, ModelEvaluator]) -> pd.
 
 if __name__ == "__main__":
     # Example usage
+    from pathlib import Path
     from train import setup_default_models, ModelTrainer
-    from preprocess import FerryDataPreprocessor, create_sample_data
+    from preprocess import FerryDataPreprocessor
     from features import FerryFeatureEngineer
-    
-    # Create sample data
-    create_sample_data("data/raw/ferry_sample_data.csv", days=30)
+
+    sample_path = Path(__file__).resolve().parent.parent / "data/raw/ferry_sample_data.csv"
+    if not sample_path.exists():
+        raise FileNotFoundError(f"Primary dataset not found: {sample_path}")
     
     # Preprocess
     preprocessor = FerryDataPreprocessor()
-    df = preprocessor.load_data("data/raw/ferry_sample_data.csv")
+    df = preprocessor.load_data(str(sample_path))
     df = preprocessor.preprocess_pipeline(df)
     
     # Feature engineering

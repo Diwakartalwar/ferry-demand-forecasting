@@ -32,3 +32,4 @@ __pycache__/
 
 # Models are required for Streamlit Cloud deployment - do not ignore joblib files
 !models/*.joblib
+!data/raw/ferry_sample_data.csv
